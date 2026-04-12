@@ -1,0 +1,28 @@
+model:
+  patch_size: 2
+  in_channels: 4
+  hidden_size: 768
+  depth: 12
+  num_heads: 12
+  mlp_ratio: 4.0
+  num_frames: 16
+  frame_height: 42
+  frame_width: 42
+  audio_dim: 256
+
+train:
+  batch_size: 1
+  lr: 1.0e-4
+  weight_decay: 0.01
+  epochs: 50
+  grad_clip: 1.0
+  log_every: 50
+  checkpoint_dir: checkpoints
+  use_fp4_qat: true
+  fp4_block_size: 64
+  ema_decay: 0.9999
+
+diffusion:
+  timesteps: 1000
+  beta_start: 0.0001
+  beta_end: 0.02
