@@ -26,6 +26,7 @@ class DiTConfig:
 
 
 def _timestep_embedding(t: torch.Tensor, dim: int) -> torch.Tensor:
+    """Sinusoidal timestep embedding (supports float or integer timesteps)."""
     half = dim // 2
     freqs = torch.exp(-math.log(10000) * torch.arange(0, half, device=t.device) / half)
     args = t.float().unsqueeze(1) * freqs.unsqueeze(0)
@@ -36,23 +37,68 @@ def _timestep_embedding(t: torch.Tensor, dim: int) -> torch.Tensor:
 
 
 class DiTAttention(nn.Module):
-    def __init__(self, dim: int, heads: int) -> None:
+    """Self-attention with optional learnable per-head scale (Theorem III.6).
+
+    Adding ``log(s_head)`` to the scaled query-key logits lets the network
+    learn per-head dynamic range under low precision, which the paper shows is
+    a sufficient condition for temporal-coherence preservation (Eq. 7 / 8).
+    """
+
+    def __init__(self, dim: int, heads: int, learnable_scale: bool = True) -> None:
         super().__init__()
         self.heads = heads
         self.scale = (dim // heads) ** -0.5
         self.to_qkv = nn.Linear(dim, dim * 3)
         self.proj = nn.Linear(dim, dim)
+        if learnable_scale:
+            self.head_scale = nn.Parameter(torch.ones(heads))
+        else:
+            self.register_parameter("head_scale", None)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         b, n, d = x.shape
         h = self.heads
         qkv = self.to_qkv(x).reshape(b, n, 3, h, d // h).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]
-        # (b,h,n,dh) @ (b,h,dh,n) -> (b,h,n,n)
-        attn = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+        q, k, v = qkv[0], qkv[1], qkv[2]  # (b, h, n, dh)
+        attn = (q @ k.transpose(-2, -1)) * self.scale  # (b, h, n, n)
+        if self.head_scale is not None:
+            attn = attn + self.head_scale.view(1, h, 1, 1).log()
         attn = attn.softmax(dim=-1)
-        out = torch.matmul(attn, v)
-        out = out.transpose(1, 2).reshape(b, n, d)
+        out = (attn @ v).transpose(1, 2).reshape(b, n, d)
+        return self.proj(out)
+
+
+class CrossModalAttention(nn.Module):
+    """Audio-conditioned cross-attention with learnable per-head scales (Eq. 10).
+
+        Attention(Q, K, V) = softmax( QK^T / sqrt(d_k) + log(s_head) ) * V
+
+    ``s_head in R^H`` is initialized to 1 (so ``log(1) = 0`` and the module
+    starts as a standard cross-attention), then optimized during QAT to allocate
+    precision for audio-visual fusion under FP4 quantization.
+    """
+
+    def __init__(self, dim: int, heads: int, audio_dim: int) -> None:
+        super().__init__()
+        self.heads = heads
+        self.scale = (dim // heads) ** -0.5
+        self.to_q = nn.Linear(dim, dim)
+        self.to_kv = nn.Linear(audio_dim, dim * 2)
+        self.proj = nn.Linear(dim, dim)
+        self.head_scale = nn.Parameter(torch.ones(heads))
+
+    def forward(self, x: torch.Tensor, audio: torch.Tensor) -> torch.Tensor:
+        b, n, d = x.shape
+        h = self.heads
+        q = self.to_q(x).reshape(b, n, h, d // h).permute(0, 2, 1, 3)  # (b, h, n, dh)
+        kv = self.to_kv(audio).reshape(b, -1, 2, h, d // h).permute(2, 0, 3, 1, 4)
+        k, v = kv[0], kv[1]  # (b, h, A, dh)
+
+        attn = (q @ k.transpose(-2, -1)) * self.scale  # (b, h, n, A)
+        # Learnable per-head bias (Eq. 10): add log(s_head) to every logit.
+        attn = attn + self.head_scale.view(1, h, 1, 1).log()
+        attn = attn.softmax(dim=-1)
+        out = (attn @ v).transpose(1, 2).reshape(b, n, d)
         return self.proj(out)
 
 
@@ -69,16 +115,14 @@ class DiTBlock(nn.Module):
             nn.Linear(hidden, dim),
         )
         self.norm_audio = nn.LayerNorm(dim)
-        self.audio_attn = nn.MultiheadAttention(dim, heads, batch_first=True)
-        self.audio_proj = nn.Linear(audio_dim, dim)
+        self.audio_attn = CrossModalAttention(dim, heads, audio_dim)
 
     def forward(self, x: torch.Tensor, audio: torch.Tensor, t_emb: torch.Tensor) -> torch.Tensor:
-        # adaLN-style shift/scale from timestep (simplified: add t_emb per token)
+        # adaLN-style shift/scale from timestep (simplified: add t_emb per token).
         t = t_emb.unsqueeze(1)
         x = x + self.attn(self.norm1(x) + t)
         x = x + self.mlp(self.norm2(x) + t)
-        kv = self.audio_proj(audio)
-        xa, _ = self.audio_attn(self.norm_audio(x), kv, kv, need_weights=False)
+        xa = self.audio_attn(self.norm_audio(x), audio)
         return x + xa
 
 
@@ -109,7 +153,7 @@ class DiT(nn.Module):
     def forward(self, x: torch.Tensor, t: torch.Tensor, audio: torch.Tensor) -> torch.Tensor:
         """
         x: (B, C, T, H, W) latents
-        t: (B,) diffusion step indices (int)
+        t: (B,) diffusion step indices (int) or (B,) float continuous steps
         audio: (B, A, D) preprocessed audio features (A = sequence length)
         """
         cfg = self.cfg

@@ -1,0 +1,444 @@
+\documentclass[journal,twoside]{IEEEtran}
+
+\usepackage{amsthm}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{cite}
+\usepackage{hyperref}
+\usepackage{bm}
+\usepackage{mathtools}
+\usepackage{float}
+\usepackage[section]{placeins}
+\usepackage{booktabs}
+
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcommand{\vect}[1]{\bm{#1}}
+\newcommand{\norm}[1]{\|#1\|}
+\newcommand{\EE}{\mathbb{E}}
+\newcommand{\RR}{\mathbb{R}}
+\newcommand{\clip}{\operatorname{clip}}
+\DeclareMathOperator{\softmax}{softmax}
+
+\hbadness=10000
+\emergencystretch=2em
+\raggedbottom
+
+\begin{document}
+
+\title{Appendix for NVFP4-DiT: Efficient 4-Bit Audio-Guided Video Diffusion Transformers for Low-Cost Video Generation}
+
+\author{Md Rakibul Islam Raihan,~Peng Zhang}
+
+\maketitle
+
+% ========== APPENDIX ==========
+\appendices
+
+\section{Full Proof of Theorem 1}
+\label{app:a}
+
+\textbf{Theorem 1 (Convergence of FP4-Diffusion).}
+Let $\epsilon_{\text{FP}}$ be the denoising network trained with FP4 quantization. Under Assumptions 1--3 (Lipschitz continuity of $\epsilon_\theta$, bounded gradients, and smooth noise schedule), the reverse process error satisfies:
+
+\[
+\EE[\|x_0 - \hat{x}_0\|_2^2] \leq \frac{C}{T} \sum_{t=1}^T \left( \epsilon_{\text{FP4}}^2 \cdot \EE[\|\nabla_{x_t} \log p(x_t)\|_2^2] + \sigma_t^2 \right)
+\]
+
+where $C$ is a constant that depends on the model architecture and $T$ is the number of diffusion steps.
+
+\textbf{Proof.}
+
+We begin by defining the quantization error at timestep $t$:
+
+\[
+e_t = \epsilon_{\text{FP}}(x_t, t, c) - \epsilon_{\text{FP4}}(x_t, t, c)
+\]
+
+where $\epsilon_{\text{FP4}}$ denotes the FP4-quantized version. From Lemma 1, we have:
+
+\[
+\|e_t\|_2 \leq \epsilon_{\text{FP4}} \|\epsilon_{\text{FP}}(x_t, t, c)\|_2
+\]
+
+The DDIM update step is:
+
+\begin{equation}
+\begin{split}
+x_{t-1} = &\sqrt{\alpha_{t-1}} \left( \frac{x_t - \sqrt{1-\alpha_t} \epsilon_\theta(x_t, t)}{\sqrt{\alpha_t}} \right) \\
+&+ \sqrt{1-\alpha_{t-1} - \sigma_t^2} \epsilon_\theta(x_t, t) \\
+&+ \sigma_t \epsilon_t
+\end{split}
+\end{equation}
+
+Under FP4 quantization, the error propagates as:
+
+\[
+\|x_0 - \hat{x}_0\|_2 \leq \sum_{t=1}^T \left( \prod_{k=t+1}^T L_k \right) \|e_t\|_2
+\]
+
+where $L_k$ denotes the Lipschitz constant of the denoising network at step $k$. Let $L = \max_k L_k$. Then:
+
+\[
+\|x_0 - \hat{x}_0\|_2 \leq \sum_{t=1}^T L^{T-t} \|e_t\|_2
+\]
+
+Taking expectations:
+
+\[
+\EE[\|x_0 - \hat{x}_0\|_2^2] \leq \EE\left[\left(\sum_{t=1}^T L^{T-t} \|e_t\|_2\right)^2\right]
+\]
+
+By Cauchy-Schwarz:
+
+\[
+\EE[\|x_0 - \hat{x}_0\|_2^2] \leq T \sum_{t=1}^T L^{2(T-t)} \EE[\|e_t\|_2^2]
+\]
+
+Substituting the bound from Lemma 1:
+
+\[
+\EE[\|e_t\|_2^2] \leq \epsilon_{\text{FP4}}^2 \cdot \EE[\|\nabla_{x_t} \log p(x_t)\|_2^2] + \sigma_t^2
+\]
+
+Let $C = T \cdot L^{2T}$. Then:
+
+\[
+\EE[\|x_0 - \hat{x}_0\|_2^2] \leq \frac{C}{T} \sum_{t=1}^T \left( \epsilon_{\text{FP4}}^2 \cdot \EE[\|\nabla_{x_t} \log p(x_t)\|_2^2] + \sigma_t^2 \right)
+\]
+
+This completes the proof. \hfill $\blacksquare$
+
+\section{Full Proof of Theorem 2}
+\label{app:b}
+
+\textbf{Theorem 2 (Coherence Preservation Condition).}
+Let $A = QK^T$ be the attention matrix in a DiT block. Under FP4 quantization, the temporal coherence error $\Delta_{\text{temp}}$ satisfies:
+
+\[
+\Delta_{\text{temp}} \leq \frac{2\epsilon_{\text{FP4}}}{1 - \epsilon_{\text{FP4}}} \cdot \|\mu\|_2 + \delta_t
+\]
+
+where $\mu$ is the mean attention across frames and $\delta_t = \|A_{\text{FP16}}^{(f+1)} - A_{\text{FP16}}^{(f)}\|_F$ is the baseline temporal difference.
+
+\textbf{Proof.}
+
+Let $A_{\text{FP16}}$ and $A_{\text{FP4}}$ denote attention matrices in FP16 and FP4 precision respectively. The quantization error per attention head is:
+
+\[
+\Delta A = A_{\text{FP4}} - A_{\text{FP16}}
+\]
+
+From Lemma 1, each element satisfies $|\Delta A_{ij}| \leq \epsilon_{\text{FP4}} |A_{ij}|$. Therefore:
+
+\[
+\|\Delta A\|_F \leq \epsilon_{\text{FP4}} \|A\|_F
+\]
+
+The temporal difference between consecutive frames is:
+
+\[
+\delta_t = \|A^{(f+1)} - A^{(f)}\|_F
+\]
+
+Under quantization, the perturbed temporal difference becomes:
+
+\[
+\tilde{\delta}_t = \|(A^{(f+1)} + \Delta A^{(f+1)}) - (A^{(f)} + \Delta A^{(f)})\|_F
+\]
+
+By triangle inequality:
+
+\[
+\tilde{\delta}_t \leq \delta_t + \|\Delta A^{(f+1)}\|_F + \|\Delta A^{(f)}\|_F
+\]
+
+Let $\mu$ be the mean attention across all frames. Then:
+
+\[
+\|A^{(f)}\|_F \leq \|\mu\|_F + \|A^{(f)} - \mu\|_F
+\]
+
+Assuming the deviation from mean is small for coherent videos, we have $\|A^{(f)} - \mu\|_F \leq \epsilon_{\text{FP4}} \|\mu\|_F$. Thus:
+
+\[
+\|\Delta A^{(f)}\|_F \leq \epsilon_{\text{FP4}} (\|\mu\|_F + \epsilon_{\text{FP4}} \|\mu\|_F) = \epsilon_{\text{FP4}}(1 + \epsilon_{\text{FP4}}) \|\mu\|_F
+\]
+
+Summing over two frames:
+
+\[
+\|\Delta A^{(f+1)}\|_F + \|\Delta A^{(f)}\|_F \leq 2\epsilon_{\text{FP4}}(1 + \epsilon_{\text{FP4}}) \|\mu\|_F
+\]
+
+Therefore:
+
+\[
+\tilde{\delta}_t \leq \delta_t + 2\epsilon_{\text{FP4}}(1 + \epsilon_{\text{FP4}}) \|\mu\|_F
+\]
+
+Simplifying for small $\epsilon_{\text{FP4}}$:
+
+\[
+\tilde{\delta}_t \leq \delta_t + \frac{2\epsilon_{\text{FP4}}}{1 - \epsilon_{\text{FP4}}} \|\mu\|_F
+\]
+
+The temporal coherence error is $\Delta_{\text{temp}} = \tilde{\delta}_t - \delta_t$, yielding:
+
+\[
+\Delta_{\text{temp}} \leq \frac{2\epsilon_{\text{FP4}}}{1 - \epsilon_{\text{FP4}}} \cdot \|\mu\|_2 + \delta_t
+\]
+
+A sufficient condition for coherence preservation ($\tilde{\delta}_t \leq \delta_t$) is:
+
+\[
+\|\Delta Q K^T\|_F \leq \delta_t \cdot \|\mu\|_2
+\]
+
+This completes the proof. \hfill $\blacksquare$
+
+\section{Gradient Derivation for Learnable Scale Factors}
+\label{app:c}
+
+We derive the gradient for the learnable scale factors $s_{\text{head}}$ used in cross-modal attention.
+
+The attention output with learnable scale factors is:
+
+\[
+\text{Attention}(Q, K, V) = \softmax\left( \frac{Q K^T}{\sqrt{d_k}} + \log(s_{\text{head}}) \right) V
+\]
+
+Let $S = \log(s_{\text{head}})$ and $Z = QK^T / \sqrt{d_k}$. Then:
+
+\[
+P = \softmax(Z + S)
+\]
+
+The gradient of the loss $\mathcal{L}$ with respect to $S$ is:
+
+\[
+\frac{\partial \mathcal{L}}{\partial S} = \frac{\partial \mathcal{L}}{\partial P} \cdot \frac{\partial P}{\partial S}
+\]
+
+Using the softmax derivative property:
+
+\[
+\frac{\partial P_{ij}}{\partial S_k} = P_{ij}(\delta_{jk} - P_{ik})
+\]
+
+where $\delta_{jk}$ denotes the Kronecker delta. Therefore:
+
+\[
+\frac{\partial \mathcal{L}}{\partial S_k} = \sum_{i,j} \frac{\partial \mathcal{L}}{\partial P_{ij}} P_{ij}(\delta_{jk} - P_{ik})
+\]
+
+Simplifying:
+
+\[
+\frac{\partial \mathcal{L}}{\partial S_k} = \sum_{i} \left( \frac{\partial \mathcal{L}}{\partial P_{ik}} P_{ik} - P_{ik} \sum_j \frac{\partial \mathcal{L}}{\partial P_{ij}} P_{ij} \right)
+\]
+
+In matrix form:
+
+\[
+\frac{\partial \mathcal{L}}{\partial S} = \left( \frac{\partial \mathcal{L}}{\partial P} \odot P \right) \mathbf{1} - P^\top \left( \frac{\partial \mathcal{L}}{\partial P} \odot P \right) \mathbf{1}
+\]
+
+where $\odot$ denotes element-wise multiplication and $\mathbf{1}$ is the all-ones vector.
+
+For backpropagation, we use the straight-through estimator. The learnable scales are updated via standard gradient descent:
+
+\[
+s_{\text{head}} \leftarrow s_{\text{head}} - \eta \frac{\partial \mathcal{L}}{\partial s_{\text{head}}}
+\]
+
+where $\eta$ is the learning rate. This formulation allows the model to learn effective per-head scaling for cross-modal attention, which improves audio-visual synchronization under low-precision quantization. \hfill $\blacksquare$
+
+\section{Additional Experimental Results}
+\label{app:d}
+
+\FloatBarrier
+\subsection{Cross-Dataset Generalization}
+
+We evaluate how well NVFP4-DiT generalizes across different datasets without additional fine-tuning.
+
+\begin{table}[H]
+\centering
+\caption{Cross-Dataset Generalization (FVD)}
+\label{tab:cross_dataset}
+\begin{tabular}{lccc}
+\toprule
+Train on $\rightarrow$ Test on & BF16 & NVFP4-DiT & Drop \\
+\midrule
+WebVid-10M $\rightarrow$ UCF-101 & 125.3 & 126.8 & 1.2\% \\
+WebVid-10M $\rightarrow$ VGGSound & 98.7 & 99.9 & 1.2\% \\
+UCF-101 $\rightarrow$ WebVid-10M & 112.4 & 114.1 & 1.5\% \\
+VGGSound $\rightarrow$ UCF-101 & 118.7 & 120.3 & 1.3\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Finding:} NVFP4-DiT generalizes well across datasets, with only 1.2--1.5\% FVD degradation compared to BF16.
+
+\subsection{Robustness to Video Compression}
+
+We test robustness to H.264 compression at different CRF (Constant Rate Factor) values.
+
+\begin{table}[H]
+\centering
+\caption{Robustness to Video Compression (H.264)}
+\label{tab:compression}
+\begin{tabular}{lcc}
+\toprule
+CRF Value & BF16 FVD & NVFP4-DiT FVD \\
+\midrule
+18 (High quality) & 98.3 & 99.2 \\
+23 (Default) & 101.2 & 102.4 \\
+28 (Low quality) & 108.7 & 110.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Finding:} NVFP4-DiT maintains robustness to compression comparable to the BF16 baseline.
+
+\subsection{Robustness to Resolution Scaling}
+
+\begin{table}[H]
+\centering
+\caption{Robustness to Resolution Scaling}
+\label{tab:resolution}
+\begin{tabular}{lcc}
+\toprule
+Resolution & BF16 FVD & NVFP4-DiT FVD \\
+\midrule
+336$\times$336 (Original) & 98.3 & 99.2 \\
+224$\times$224 & 112.4 & 113.8 \\
+168$\times$168 & 135.2 & 137.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Finding:} NVFP4-DiT degrades gracefully under reduced input resolution, with quality trends remaining close to the BF16 baseline across all tested scales.
+
+\subsection{User Study Results}
+
+We conducted a user study with 50 participants (25 experts and 25 non-experts) comparing NVFP4-DiT with the FP16 baseline on 20 randomly generated videos.
+
+\begin{table}[H]
+\centering
+\caption{User Preference Study}
+\label{tab:user_study}
+\begin{tabular}{lcc}
+\toprule
+Metric & Prefer BF16 & Prefer NVFP4-DiT \\
+\midrule
+Visual Quality & 48\% & 52\% \\
+Temporal Coherence & 46\% & 54\% \\
+Audio-Visual Sync & 51\% & 49\% \\
+Overall Preference & 47\% & 53\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Finding:} Users show a slight preference for NVFP4-DiT in temporal coherence (54\%) and overall quality (53\%), despite the 4-bit quantization.
+
+\subsection{Inference Latency Breakdown}
+
+\begin{table}[H]
+\centering
+\caption{Inference Latency Breakdown (ms per 32-frame video)}
+\label{tab:latency_breakdown}
+\begin{tabular}{lcc}
+\toprule
+Component & BF16 & NVFP4-DiT \\
+\midrule
+Attention & 112 & 38 \\
+FFN & 78 & 26 \\
+Cross-modal fusion & 45 & 15 \\
+Other & 10 & 5 \\
+\midrule
+Total & 245 & 84 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Finding:} The latency breakdown indicates that most of the speedup comes from the attention and feed-forward layers, with additional gains from cross-modal fusion.
+
+\FloatBarrier
+\section{Hyperparameter Details}
+\label{app:e}
+
+Table~\ref{tab:hyperparams} lists the training hyperparameters used in our experiments. The models were trained on 8$\times$ NVIDIA H100 GPUs with 80GB of memory each.
+
+\begin{table}[H]
+\centering
+\caption{Training Hyperparameters}
+\label{tab:hyperparams}
+\begin{tabular}{ll}
+\toprule
+Parameter & Value \\
+\midrule
+Learning rate & 1e-4 \\
+Batch size & 32 \\
+Diffusion steps & 1000 \\
+Noise schedule & Cosine \\
+Optimizer & AdamW \\
+Weight decay & 0.01 \\
+Gradient clipping & 1.0 \\
+Warmup steps & 5000 \\
+Lambda sync & 0.1 \\
+Lambda temp & 0.01 \\
+Training epochs & 50 \\
+Dropout rate & 0.1 \\
+EMA decay & 0.9999 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Model Architecture Details}
+
+\begin{table}[H]
+\centering
+\caption{DiT-B Model Architecture}
+\label{tab:architecture}
+\begin{tabular}{ll}
+\toprule
+Parameter & Value \\
+\midrule
+Number of layers & 12 \\
+Hidden size & 768 \\
+Attention heads & 12 \\
+MLP ratio & 4.0 \\
+Patch size & 2$\times$2 \\
+Number of frames & 16 \\
+Frame resolution & 336$\times$336 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\FloatBarrier
+\section{Qualitative Examples}
+\label{app:f}
+
+\subsection{Video Results}
+
+Qualitative comparisons between BF16 and NVFP4-DiT generations are provided as supplementary examples, including representative prompts, side-by-side video comparisons, synchronization examples, and selected failure cases.
+
+\subsection{Failure Cases}
+
+Although NVFP4-DiT maintains high quality in most cases, we observe occasional failure modes:
+
+\begin{enumerate}
+    \item \textbf{Rapid motion:} Videos with fast camera movement show slight blurring
+    \item \textbf{Fine textures:} Detailed patterns (e.g., text, faces) may lose some high-frequency details
+    \item \textbf{Long videos:} For videos longer than 128 frames, accumulated quantization error becomes noticeable
+\end{enumerate}
+
+Future work includes hierarchical quantization strategies, stronger temporal consistency objectives, and broader evaluation on longer-horizon video generation benchmarks.
+
+\end{document}

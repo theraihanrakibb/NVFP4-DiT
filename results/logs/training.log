@@ -5,3 +5,4 @@ step=210 epoch=2 loss=1.002727
 step=220 epoch=2 loss=1.004688
 step=230 epoch=2 loss=1.003561
 step=240 epoch=2 loss=1.009056
+step=250 epoch=2 loss=1.002176
