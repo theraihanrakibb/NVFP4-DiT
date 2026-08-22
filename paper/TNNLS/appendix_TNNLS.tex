@@ -9,6 +9,8 @@
 \usepackage{float}
 \usepackage[section]{placeins}
 \usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{url}
 
 \newtheorem{theorem}{Theorem}[section]
 \newtheorem{lemma}[theorem]{Lemma}
@@ -31,9 +33,9 @@
 
 \begin{document}
 
-\title{Appendix for NVFP4-DiT: Efficient 4-Bit Audio-Guided Video Diffusion Transformers for Low-Cost Video Generation}
+\title{Appendix for NVFP4-DiT: Efficient 4-Bit Audio-Guided Video Diffusion Transformers for Low-Cost Video Generation \\ {\small Submitted to the IEEE Transactions on Neural Networks and Learning Systems}}
 
-\author{Md Rakibul Islam Raihan,~Peng Zhang}
+\author{Anonymous Authors}
 
 \maketitle
 
@@ -128,7 +130,7 @@ where $\mu$ is the mean attention across frames and $\delta_t = \|A_{\text{FP16}
 
 \textbf{Proof.}
 
-Let $A_{\text{FP16}}$ and $A_{\text{FP4}}$ denote attention matrices in FP16 and FP4 precision respectively. The quantization error per attention head is:
+Let $A_{\text{FP16}}$ and $A_{\text{FP4}}$ denote attention matrices in FP16 and FP4 precision, respectively. The quantization error per attention head is:
 
 \[
 \Delta A = A_{\text{FP4}} - A_{\text{FP16}}

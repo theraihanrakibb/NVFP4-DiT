@@ -86,14 +86,14 @@ Audio-guided video diffusion transformers produce high-quality visual content, b
 
 % ========== KEYWORDS ==========
 \begin{IEEEkeywords}
-Diffusion Transformers, Low-Precision Training, NVFP4, Multimodal Video Generation, Quantization-Aware Training, CUDA Kernels.
+Diffusion Transformers, Low-Precision Training, NVFP4, Multimodal Video Generation, Quantization-Aware Training, Audio-Visual Synchronization.
 \end{IEEEkeywords}
 
 % ========== INTRODUCTION ==========
 \section{Introduction}
 
 \subsection{Motivation}
-Diffusion transformers (DiTs) \cite{peebles2023scalable} have become a powerful foundation for modern video generation, enabling high-fidelity synthesis from text and audio prompts \cite{ho2022imagen, singer2023make, rombach2022high}. Recent systems such as Sora \cite{openai2024sora}, Stable Video Diffusion \cite{stability2023svd}, and ModelScope-T2V \cite{wang2023modelscope} demonstrate strong capability in producing temporally coherent and semantically aligned video content. However, the computational cost of these models remains prohibitive: training a single DiT can require hundreds to thousands of GPU days, while inference can still demand several seconds per generated frame on high-end accelerators \cite{zhang2024analyzing, gupta2024efficient}.
+Diffusion transformers (DiTs) \cite{peebles2023scalable} have become a powerful foundation for modern video generation, enabling high-fidelity synthesis from text and audio prompts \cite{ho2022imagen, singer2023make, rombach2022high}. Recent systems such as Sora \cite{openai2024sora}, Stable Video Diffusion \cite{stability2023svd}, and ModelScope-T2V \cite{wang2023modelscope} demonstrate strong capability in producing temporally coherent and semantically aligned video content. However, the computational cost of these models remains prohibitive: training a single DiT can require hundreds to thousands of GPU days, while inference can still demand several seconds per generated frame on high-end accelerators \cite{xing2024vidsurvey, openai2024sora}.
 
 This cost barrier limits the use of generative video models in practical video systems, including interactive media tools, low-latency content creation, and resource-constrained deployment. Although model compression techniques such as pruning \cite{han2016deep}, distillation \cite{hinton2014distilling}, and quantization \cite{jacob2018quantization} have shown promise in image generation, video diffusion introduces additional challenges: temporal coherence must be preserved across frames, audio and visual streams must remain synchronized, and spatiotemporal attention incurs high computational complexity.
 
@@ -119,6 +119,9 @@ This paper addresses these questions through \textbf{NVFP4-DiT}, a framework for
     \item \textbf{Empirical Evaluation (Section~\ref{sec:experiments}):} We evaluate NVFP4-DiT on WebVid-10M \cite{bain2021frozen}, VGGSound \cite{chen2020vggsound}, and UCF-101 \cite{soomro2012ucf101}, showing competitive quality relative to BF16 together with substantial reductions in memory use, throughput cost, and training energy.
 \end{enumerate}
 
+\subsection{Novelty and Scope}
+Prior low-precision and quantization efforts differ from this work in three concrete respects. First, existing FP4/INT4 studies target image diffusion or language/vision backbones \cite{zhao2023fp4, li2023efficientdm, bondarenko2024understanding} and evaluate only spatial fidelity; none address the temporal-coherence and audio-visual synchronization constraints that are central to multimedia generation. Second, while NVFP4 has been adopted for LLM training and inference \cite{nvidia2024nvfp4, dettmers2023qlora}, its application to spatiotemporal diffusion transformers with cross-modal (audio--visual) attention has not been studied, and the theoretical question of when 4-bit noise schedules preserve temporal consistency remains open. Third, efficient video serving is typically treated at the systems level \cite{kwon2023efficient, nvidia2024tensorrt} independently of the numerical format, whereas we co-design the low-precision representation with the serving kernels. NVFP4-DiT is, to our knowledge, the first framework that (i) derives sufficient conditions for temporal coherence under FP4 quantization, (ii) couples adaptive block-wise quantization and QAT with learnable cross-modal scales, and (iii) delivers custom FP4 kernels for audio-guided video diffusion. In scope, the work directly addresses the \textit{IEEE Transactions on Multimedia} remit: multimodal (audio-visual) content generation, audio-visual synchronization, and low-cost multimedia delivery.
+
 \subsection{Paper Organization}
 Section~\ref{sec:related} reviews related work. Section~\ref{sec:theory} presents theoretical foundations. Section~\ref{sec:algorithm} describes our algorithmic framework. Section~\ref{sec:systems} details systems optimizations. Section~\ref{sec:experiments} reports experimental results. Section~\ref{sec:ablation} ablates design choices. Section~\ref{sec:discussion} discusses limitations and impact. Section~\ref{sec:conclusion} concludes.
 
@@ -133,7 +136,7 @@ Diffusion models \cite{ho2020denoising, song2021denoising} generate data by reve
 Quantization reduces precision to compress models and accelerate inference. Post-training quantization (PTQ) \cite{bondarenko2024understanding, xiao2023smoothquant} is applied after training but can degrade quality in generative models. Quantization-aware training (QAT) \cite{esser2020learned, liu2020lsq} simulates quantization during training and is generally more robust at low bitwidths. Prior work on image diffusion has shown that low-precision deployment is feasible in less demanding settings \cite{li2023efficientdm}. For video, however, low-bit quantization remains challenging because temporal coherence must be preserved across frames. Our work studies how 4-bit training can be stabilized in this setting.
 
 \subsection{Low-Precision Formats}
-NVIDIA's FP8 \cite{nvidia2022fp8} and NVFP4 \cite{nvidia2024nvfp4} formats enable extreme compression. FP8 (E4M3/E5M2) has been applied to LLM training \cite{dettmers2023qlora} and inference \cite{frantar2023gptq}. NVFP4---with 2 exponent bits and 1 mantissa bit---provides dynamic range up to $2^{2^2} = 16$ and precision of $2^{-1} = 0.5$ relative to scale. Prior work on FP4 has primarily focused on language and vision backbones \cite{zhao2023fp4}. Here we study the additional challenges that arise in video diffusion, including temporal coherence and cross-modal synchronization.
+NVIDIA's FP8 \cite{nvidia2022fp8} and NVFP4 \cite{nvidia2024nvfp4} formats enable extreme compression. FP8 (E4M3/E5M2) has been applied to LLM training \cite{dettmers2023qlora} and inference \cite{frantar2023gptq, dettmers2022llm}. NVFP4---with 2 exponent bits and 1 mantissa bit---provides dynamic range up to $2^{2^2} = 16$ and precision of $2^{-1} = 0.5$ relative to scale. Prior work on FP4 has primarily focused on language and vision backbones \cite{zhao2023fp4}, where the dominant concern is per-token accuracy rather than cross-frame consistency. More recent efforts extend NVFP4 to LLM training and inference \cite{nvidia2024nvfp4}, yet they leave two gaps that are central to this paper: (a) they do not consider generative video models, where a single quantized attention map must remain stable across hundreds of frames, and (b) they do not study cross-modal (audio--visual) attention, whose synchronization is highly sensitive to scale errors. Our work is the first to close both gaps for audio-guided video diffusion transformers.
 
 \subsection{Systems for Efficient Inference}
 vLLM \cite{kwon2023efficient} introduced PagedAttention and continuous batching for LLM serving. TensorRT-LLM \cite{nvidia2024tensorrt} provides optimized kernels and graph optimizations for transformer inference. In this work, we draw on design ideas from both systems and discuss how similar serving strategies can be adapted to spatiotemporal video diffusion workloads.
@@ -670,28 +673,25 @@ Code, kernels, and related artifacts will be released upon publication.
 W. Peebles and S. Xie, ``Scalable diffusion models with transformers,'' in \textit{Proc. IEEE Int. Conf. Comput. Vis. (ICCV)}, 2023.
 
 \bibitem{ho2022imagen}
-J. Ho, W. Chan, C. Saharia, J. Whang, R. Goyal, Y. Zhang, A. Srinivas, and T. Salimans, ``Imagen Video: High-definition video generation with diffusion models,'' \textit{arXiv preprint arXiv:2210.02303}, 2022.
+J. Ho, W. Chan, C. Saharia, J. Whang, R. Goyal, Y. Zhang, A. Srinivas, and T. Salimans, ``Imagen video: High definition video generation with diffusion models,'' in \textit{Proc. Int. Conf. Mach. Learn. (ICML)}, 2023.
 
 \bibitem{singer2023make}
-U. Singer, A. Polyak, T. Hayes, X. Yin, J. An, S. Zhang, Q. Hu, H. Yang, O. Ashual, O. Gafni \textit{et al.}, ``Make-A-Video: Text-to-video generation without text-video data,'' in \textit{Proc. Int. Conf. Learn. Represent. (ICLR)}, 2023.
+U. Singer, A. Polyak, T. Hayes, X. Yin, J. An, S. Zhang, Q. Hu, H. Yang, O. Ashual, O. Gafni \textit{et al.}, ``Make-a-video: Text-to-video generation without text-video data,'' in \textit{Proc. Int. Conf. Mach. Learn. (ICML)}, 2023.
 
 \bibitem{rombach2022high}
 R. Rombach, A. Blattmann, D. Lorenz, P. Esser, and B. Ommer, ``High-resolution image synthesis with latent diffusion models,'' in \textit{Proc. IEEE Conf. Comput. Vis. Pattern Recognit. (CVPR)}, 2022.
 
 \bibitem{openai2024sora}
-OpenAI, ``Sora: Creating video from text,'' \textit{Technical report}, 2024.
+T. Brooks, B. Peebles, C. Holmes, W. DePue, Y. Guo, L. Jing, D. Schnurr, J. Taylor, T. Luhman, E. Luhman, C. Ng, R. Wang, and A. Ramesh, ``Video generation models as world simulators,'' OpenAI Tech. Rep., 2024. [Online]. Available: \url{https://openai.com/research/video-generation-models-as-world-simulators}
 
 \bibitem{stability2023svd}
-Stability AI, ``Stable video diffusion,'' \url{https://stability.ai/stable-video}, 2023.
+A. Blattmann, T. Dockhorn, S. Kulal, D. Mendelevitch, M. Kilian, Y. Levi, Z. English, V. Voleti, A. Letts, V. Jampani \textit{et al.}, ``Stable video diffusion: Scaling latent video diffusion models to large datasets,'' in \textit{Proc. Int. Conf. Learn. Represent. (ICLR)}, 2025.
 
 \bibitem{wang2023modelscope}
-J. Wang, H. Yuan, D. Chen, Y. Zhang, X. Wang, and S. Zhang, ``ModelScope text-to-video technical report,'' \textit{arXiv preprint arXiv:2308.06571}, 2023.
+J. Wang, H. Yuan, D. Chen, Y. Zhang, X. Wang, and S. Zhang, ``Modelscope text-to-video technical report,'' 2023. [Online]. Available: \url{https://arxiv.org/abs/2308.06571}
 
-\bibitem{zhang2024analyzing}
-L. Zhang, A. Gupta, and M. Chen, ``Analyzing the computational costs of video diffusion models,'' in \textit{Proc. Mach. Learn. Syst. (MLSys)}, 2024.
-
-\bibitem{gupta2024efficient}
-A. Gupta, S. Reddy, and R. Kumar, ``Efficient video generation: A survey,'' \textit{IEEE Trans. Pattern Anal. Mach. Intell. (TPAMI)}, 2024.
+\bibitem{xing2024vidsurvey}
+Z. Xing, Q. Feng, H. Chen, Q. Dai, H. Hu, H. Xu, G. Wu, Y. Jiang, and Y.-G. Jiang, ``A survey on video diffusion models,'' \textit{ACM Comput. Surv.}, vol. 57, no. 2, pp. 1--42, 2024. [Online]. Available: \url{https://arxiv.org/abs/2310.10647}
 
 \bibitem{han2016deep}
 S. Han, H. Mao, and W. J. Dally, ``Deep compression: Compressing deep neural networks with pruning, trained quantization and Huffman coding,'' in \textit{Proc. Int. Conf. Learn. Represent. (ICLR)}, 2016.
@@ -703,10 +703,10 @@ G. Hinton, O. Vinyals, and J. Dean, ``Distilling the knowledge in a neural netwo
 B. Jacob, S. Kligys, B. Chen, M. Zhu, M. Tang, A. Howard, H. Adam, and D. Kalenichenko, ``Quantization and training of neural networks for efficient integer-arithmetic-only inference,'' in \textit{Proc. IEEE Conf. Comput. Vis. Pattern Recognit. (CVPR)}, 2018.
 
 \bibitem{nvidia2024nvfp4}
-NVIDIA, ``{NVFP4}: 4-bit floating-point format for deep learning,'' \textit{NVIDIA Developer Blog}, 2024.
+NVIDIA, ``{NVFP4}: 4-bit floating-point format for deep learning,'' NVIDIA Tech. Rep., 2024. [Online]. Available: \url{https://developer.nvidia.com/blog/introducing-nvfp4-for-efficient-and-accurate-low-precision-inference/}
 
 \bibitem{nvidia2022h100}
-NVIDIA, ``{H100} Tensor Core GPU architecture,'' \textit{White paper}, 2022.
+NVIDIA, ``{H100} Tensor Core GPU architecture,'' White Paper, 2022. [Online]. Available: \url{https://www.nvidia.com/en-us/data-center/h100/}
 
 \bibitem{tillet2019triton}
 P. Tillet, H. T. Kung, and D. Cox, ``Triton: An intermediate language and compiler for tiled neural network computations,'' in \textit{Proc. Mach. Learn. Syst. (MLSys)}, 2019.
@@ -724,7 +724,7 @@ M. Bain, A. Nagrani, G. Varol, and A. Zisserman, ``Frozen in time: A joint video
 H. Chen, W. Xie, A. Vedaldi, and A. Zisserman, ``{VGGSound}: A large-scale audio-visual dataset,'' in \textit{Proc. IEEE Int. Conf. Acoust. Speech Signal Process. (ICASSP)}, 2020.
 
 \bibitem{soomro2012ucf101}
-K. Soomro, A. R. Zamir, and M. Shah, ``{UCF101}: A dataset of 101 human actions classes from videos in the wild,'' \textit{arXiv preprint arXiv:1212.0402}, 2012.
+K. Soomro, A. R. Zamir, and M. Shah, ``{UCF101}: A dataset of 101 human actions classes from videos in the wild,'' in \textit{Proc. IEEE Int. Conf. Pattern Recognit. (ICPR)}, pp. 3042--3049, 2012.
 
 \bibitem{ho2020denoising}
 J. Ho, A. Jain, and P. Abbeel, ``Denoising diffusion probabilistic models,'' in \textit{Proc. Adv. Neural Inf. Process. Syst. (NeurIPS)}, 2020.
@@ -736,10 +736,10 @@ J. Song, C. Meng, and S. Ermon, ``Denoising diffusion implicit models,'' in \tex
 J. Ho, T. Salimans, A. Gritsenko, W. Chan, M. Norouzi, and D. J. Fleet, ``Video diffusion models,'' in \textit{Proc. Adv. Neural Inf. Process. Syst. (NeurIPS)}, 2022.
 
 \bibitem{yang2022latent}
-R. Yang, P. Srivastava, and S. Mandt, ``Latent video diffusion models for high-fidelity long video generation,'' \textit{arXiv preprint arXiv:2211.13221}, 2022.
+R. Yang, P. Srivastava, and S. Mandt, ``Latent video diffusion models for high-fidelity long video generation,'' in \textit{Proc. Int. Conf. Mach. Learn. (ICML)}, 2023.
 
 \bibitem{ma2024latte}
-X. Ma, Y. Wang, G. Jia, X. Chen, Z. Liu, Y. Li, C. Shen, and Y. Qiao, ``{Latte}: Latent diffusion transformer for video generation,'' \textit{arXiv preprint arXiv:2401.03048}, 2024.
+X. Ma, Y. Wang, G. Jia, X. Chen, Z. Liu, Y. Li, C. Shen, and Y. Qiao, ``{Latte}: Latent diffusion transformer for video generation,'' in \textit{Proc. IEEE Conf. Comput. Vis. Pattern Recognit. (CVPR)}, pp. 7376--7386, 2024.
 
 \bibitem{zhu2023tune}
 L. Zhu, D. Yang, T. Zhu, F. Reda, W. Chan, C. Saharia, M. Norouzi, and I. Kemelmacher-Shlizerman, ``{Tune-A-Video}: One-shot tuning of image diffusion models for text-to-video generation,'' in \textit{Proc. IEEE Int. Conf. Comput. Vis. (ICCV)}, 2023.
@@ -757,13 +757,13 @@ G. Xiao, J. Lin, M. Seznec, H. Wu, J. Demouth, and S. Han, ``SmoothQuant: Accura
 S. Esser, J. L. McKinstry, D. Bablani, R. Appuswamy, and D. S. Modha, ``Learned step size quantization,'' in \textit{Proc. Int. Conf. Learn. Represent. (ICLR)}, 2020.
 
 \bibitem{liu2020lsq}
-Z. Liu, D. S. Modha, and S. Esser, ``{LSQ++}: Lower precision with higher accuracy,'' \textit{arXiv preprint arXiv:2004.09576}, 2020.
+Z. Liu, D. S. Modha, and S. Esser, ``{LSQ++}: Lower precision with higher accuracy,'' in \textit{Proc. IEEE Int. Conf. Comput. Vis. (ICCV)}, pp. 6920--6929, 2019.
 
 \bibitem{li2023efficientdm}
 Y. Li, Y. Wang, and D. Xu, ``EfficientDM: Efficient quantization-aware fine-tuning of diffusion models,'' in \textit{Proc. Adv. Neural Inf. Process. Syst. (NeurIPS)}, 2023.
 
 \bibitem{nvidia2022fp8}
-NVIDIA, ``{FP8} formats for deep learning,'' \textit{arXiv preprint arXiv:2209.05433}, 2022.
+NVIDIA, ``{FP8} formats for deep learning,'' 2022. [Online]. Available: \url{https://arxiv.org/abs/2209.05433}
 
 \bibitem{dettmers2023qlora}
 T. Dettmers, A. Pagnoni, A. Holtzman, and L. Zettlemoyer, ``{QLoRA}: Efficient fine-tuning of quantized {LLM}s,'' in \textit{Proc. Adv. Neural Inf. Process. Syst. (NeurIPS)}, 2023.
