@@ -8,9 +8,9 @@ NOTE on anonymization:
   * Main Manuscript (NVFP4-DiT_TNNLS.pdf) is fully anonymized and goes to
     reviewers.  The Title Page below is admin-only (NOT sent to reviewers),
     so real author names / affiliations are correct here.
-  * Acknowledgments are intentionally OMITTED.  Do not add bracketed
-    placeholders, fabricated grants, or "thank the reviewers" text.  Add a
-    real acknowledgment only if the author supplies confirmed wording.
+  * Acknowledgments: only a confirmed, truthful line is included (NWPU support).
+    Do not add bracketed placeholders, fabricated grants, or "thank the reviewers"
+    text.  Change this wording only with the user's confirmed input.
 """
 
 import zipfile
@@ -126,7 +126,9 @@ def title_page_paras():
     p.append(para([run('Md Rakibul Islam Raihan, School of Software, '
                        'Northwestern Polytechnical University, Xi\'an, 710072, China')]))
     p.append(para([run('e-mail: raihan@mail.nwpu.edu.cn')]))
-    # Acknowledgments intentionally omitted -- no placeholders / fabricated text.
+    p.append(para([run('Acknowledgments', bold=True, size=24)], before=120))
+    p.append(para([run('The authors thank Northwestern Polytechnical University '
+                       'for supporting this research.')]))
     return p
 
 
